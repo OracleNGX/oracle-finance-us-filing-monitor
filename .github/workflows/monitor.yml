@@ -1,1 +1,57 @@
 
+name: Oracle Finance US filing monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * 1-5"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: oracle-finance-us-filing-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Collect SEC filings and build RSS feed
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          SEC_LATEST_FILINGS_RSS: ${{ vars.SEC_LATEST_FILINGS_RSS }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}
+          WATCH_FORMS: "8-K,10-Q,10-K,4,3,5,SC 13D,SC 13G,13D,13G,S-1,S-3,DEF 14A,6-K,20-F,40-F"
+        run: python monitor.py
+
+      - name: Publish updated RSS and state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/oracle-us-filings.xml data/seen.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Update Oracle Finance US filings feed"
+            git push origin HEAD:main
+          else
+            echo "No changes to publish."
+          fi
+
