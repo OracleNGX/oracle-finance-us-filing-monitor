@@ -1,236 +1,470 @@
-import os, json, time, smtplib, hashlib
-from email.message import EmailMessage
-from datetime import datetime, timezone
+
+import os
+import re
+import json
+import time
+import hashlib
+import smtplib
+import html
 from pathlib import Path
+from datetime import datetime, timezone
+from email.message import EmailMessage
+from email.utils import format_datetime, parsedate_to_datetime
+
 import requests
 import feedparser
 
-BASE = Path(__file__).parent
-DATA = BASE / 'data'
-DATA.mkdir(exist_ok=True)
-STATE = DATA / 'seen.json'
-OUT = BASE / 'docs' / 'oracle-us-filings.xml'
-OUT.parent.mkdir(exist_ok=True)
-SEC_TICKERS = 'https://www.sec.gov/files/company_tickers_exchange.json'
-USER_AGENT = os.environ['SEC_USER_AGENT']
-RSS_URL = os.environ['SEC_LATEST_FILINGS_RSS']
-FORMS = set(os.getenv('WATCH_FORMS', '8-K,10-Q,10-K,4,3,5,SC 13D,SC 13G,13D,13G,S-1,S-3,DEF 14A,6-K,20-F,40-F').split(','))
+
+# ------------------------------------------------------------
+# Oracle Finance — US Stock-Market Filing Monitor
+# Sources: SEC company ticker/exchange directory + SEC RSS feed
+# Output: docs/oracle-us-filings.xml
+# State:  data/seen.json
+# ------------------------------------------------------------
+
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+DOCS_DIR = BASE_DIR / "docs"
+
+STATE_FILE = DATA_DIR / "seen.json"
+OUTPUT_FILE = DOCS_DIR / "oracle-us-filings.xml"
+
+SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers_exchange.json"
+
+USER_AGENT = os.environ.get("SEC_USER_AGENT", "").strip()
+RSS_URL = os.environ.get("SEC_LATEST_FILINGS_RSS", "").strip()
+
+DEFAULT_FORMS = (
+    "8-K,10-Q,10-K,4,3,5,SC 13D,SC 13G,13D,13G,"
+    "S-1,S-3,DEF 14A,6-K,20-F,40-F"
+)
+
+WATCH_FORMS = {
+    item.strip().upper()
+    for item in os.environ.get("WATCH_FORMS", DEFAULT_FORMS).split(",")
+    if item.strip()
+}
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DOCS_DIR.mkdir(parents=True, exist_ok=True)
+
+if not USER_AGENT:
+    raise RuntimeError(
+        "Missing SEC_USER_AGENT. Add it under GitHub Actions repository secrets."
+    )
+
+if not RSS_URL:
+    raise RuntimeError(
+        "Missing SEC_LATEST_FILINGS_RSS. Add it under GitHub Actions repository variables."
+    )
 
 session = requests.Session()
-session.headers.update({'User-Agent': USER_AGENT, 'Accept-Encoding': 'gzip, deflate', 'Host': 'www.sec.gov'})
+session.headers.update({
+    "User-Agent": USER_AGENT,
+    "Accept-Encoding": "gzip, deflate",
+    "Accept": "application/atom+xml, application/rss+xml, application/xml, text/xml, */*",
+})
+
+
+def normalize_cik(value):
+    """Convert a CIK to the SEC's ten-digit format."""
+    digits = re.sub(r"\D", "", str(value or ""))
+    return digits.zfill(10) if digits else ""
 
 
 def load_issuer_map():
-    r = session.get(SEC_TICKERS, timeout=30)
-    r.raise_for_status()
-    raw = r.json()
+    """
+    Load SEC issuer records and retain records whose exchange is
+    NYSE or Nasdaq.
 
-    if isinstance(raw, dict) and isinstance(raw.get('fields'), list):
-        fields = raw['fields']
-        rows = [dict(zip(fields, row)) for row in raw['data']]
-    else:
-        rows = raw.values() if isinstance(raw, dict) else raw
+    The SEC directory currently uses a column-oriented format:
+    {"fields": [...], "data": [[...], [...]]}
+    This function also tolerates row-oriented formats.
+    """
+    response = session.get(SEC_TICKERS_URL, timeout=30)
+    response.raise_for_status()
+    raw = response.json()
 
-    out = {}
-
-    for x in rows:
-        if not isinstance(x, dict):
-            continue
-
-        exchange = str(x.get('exchange', '')).strip().upper()
-        if exchange not in {'NYSE', 'NASDAQ'}:
-            continue
-
-        cik = str(x.get('cik_str') or x.get('cik') or '').zfill(10)
-        ticker = str(x.get('ticker', '')).strip().upper()
-
-        if cik and ticker:
-            out[cik] = {
-                'ticker': ticker,
-                'name': x.get('name') or x.get('title', ''),
-                'exchange': exchange
-            }
-
-    if not out:
-        raise RuntimeError("No NYSE/Nasdaq issuers returned by SEC")
-
-    return out
-
-
-def esc(s):
-    return (
-        str(s)
-        .replace('&', '&amp;')
-        .replace('<', '&lt;')
-        .replace('>', '&gt;')
-        .replace('"', '&quot;')
-        .replace("'", '&apos;')
-    )
-    r = session.get(SEC_TICKERS, timeout=30)
-    r.raise_for_status()
-    raw = r.json()
-
-    if isinstance(raw, dict) and isinstance(raw.get('fields'), list):
-        fields = raw['fields']
-        rows = [dict(zip(fields, row)) for row in raw['data']]
-    else:
-        rows = raw.values() if isinstance(raw, dict) else raw
-
-    out = {}
-
-    for x in rows:
-        if not isinstance(x, dict):
-            continue
-
-        exchange = str(x.get('exchange', '')).strip().upper()
-        if exchange not in {'NYSE', 'NASDAQ'}:
-            continue
-
-        cik = str(x.get('cik_str') or x.get('cik') or '').zfill(10)
-        ticker = str(x.get('ticker', '')).strip().upper()
-
-        if cik and ticker:
-            out[cik] = {
-                'ticker': ticker,
-                'name': x.get('name') or x.get('title', ''),
-                'exchange': exchange
-            }
-
-    if not out:
-        raise RuntimeError("No NYSE/Nasdaq issuers returned by SEC")
-
-    return out
-
-
-def esc(s):
-    return (
-        str(s)
-        .replace('&', '&amp;')
-        .replace('<', '&lt;')
-        .replace('>', '&gt;')
-        .replace('"', '&quot;')
-        .replace("'", '&apos;')
-    )
-        return out
-
-
-def esc(s):
-    r.raise_for_status()
-    raw = r.json()
-
-    # SEC directory uses fields + data arrays.
-    if isinstance(raw, dict) and isinstance(raw.get('fields'), list) and isinstance(raw.get('data'), list):
-        fields = raw['fields']
+    if (
+        isinstance(raw, dict)
+        and isinstance(raw.get("fields"), list)
+        and isinstance(raw.get("data"), list)
+    ):
+        fields = raw["fields"]
         rows = [
             dict(zip(fields, row))
-            for row in raw['data']
-            if isinstance(row, list)
+            for row in raw["data"]
+            if isinstance(row, (list, tuple))
         ]
-    elif isinstance(raw, dict) and isinstance(raw.get('data'), list):
-        rows = raw['data']
+    elif isinstance(raw, dict) and isinstance(raw.get("data"), list):
+        rows = raw["data"]
     elif isinstance(raw, dict):
         rows = list(raw.values())
-    else:
+    elif isinstance(raw, list):
         rows = raw
+    else:
+        raise RuntimeError("Unrecognized SEC ticker-directory format.")
 
-    out = {}
+    issuers = {}
 
-    for x in rows:
-        if not isinstance(x, dict):
+    for row in rows:
+        if not isinstance(row, dict):
             continue
 
-        exchange = str(x.get('exchange', '')).strip().upper()
-        if exchange not in {'NYSE', 'NASDAQ'}:
+        exchange = str(row.get("exchange") or "").strip().upper()
+        if exchange not in {"NYSE", "NASDAQ"}:
             continue
 
-        cik = str(x.get('cik_str') or x.get('cik') or '').zfill(10)
-        ticker = str(x.get('ticker', '')).strip().upper()
+        cik = normalize_cik(row.get("cik_str") or row.get("cik"))
+        ticker = str(row.get("ticker") or "").strip().upper()
+        name = str(row.get("name") or row.get("title") or "").strip()
 
         if cik and ticker:
-            out[cik] = {
-                'ticker': ticker,
-                'name': x.get('name') or x.get('title', ''),
-                'exchange': exchange
+            issuers[cik] = {
+                "ticker": ticker,
+                "name": name,
+                "exchange": exchange,
             }
 
-    return out
-    
-    r = session.get(SEC_TICKERS, timeout=30); r.raise_for_status()
-    raw = r.json()
-    rows = raw.values() if isinstance(raw, dict) else raw
-    out = {}
-    for x in rows:
-        exchange = str(x.get('exchange','')).strip().upper()
-        if exchange not in {'NYSE', 'NASDAQ'}: continue
-        cik = str(x.get('cik_str') or x.get('cik') or '').zfill(10)
-        ticker = str(x.get('ticker','')).strip().upper()
-        if cik and ticker: out[cik] = {'ticker': ticker, 'name': x.get('name') or x.get('title',''), 'exchange': exchange}
-    return out
+    if not issuers:
+        raise RuntimeError(
+            "The SEC directory returned no NYSE/Nasdaq issuer records."
+        )
 
-def esc(s):
-    return str(s).replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('"','&quot;')
+    return issuers
 
-def main():
-    issuers = load_issuer_map()
-    parsed = feedparser.parse(RSS_URL)
-    if parsed.bozo and not parsed.entries: raise RuntimeError(f'RSS parse failed: {parsed.bozo_exception}')
-    seen = json.loads(STATE.read_text()) if STATE.exists() else []
-    seen_set = set(seen)
-    fresh=[]
-    for e in parsed.entries:
-        link = e.get('link','')
-        # SEC filing URLs include /data/{CIK}/; extract the numeric CIK.
-        import re
-        m = re.search(r'/data/(\d+)/', link)
-        if not m: m = re.search(r'\bCIK\s*=?\s*(\d+)', e.get('summary',''), re.I)
-        if not m: continue
-        cik = m.group(1).zfill(10)
-        issuer = issuers.get(cik)
-        if not issuer: continue
-        title = e.get('title','SEC filing')
-        form = (e.get('form') or '').strip()
-        if not form:
-            fm = re.search(r'\b(8-K|10-Q|10-K|20-F|6-K|40-F|S-1|S-3|DEF 14A|SC 13D|SC 13G|13D|13G|4|3|5)\b', title, re.I)
-            form = fm.group(1).upper() if fm else ''
-        if form and form not in FORMS: continue
-        uid = e.get('id') or link or hashlib.sha256((title+link).encode()).hexdigest()
-        if uid in seen_set: continue
-        item = {'title':title, 'link':link, 'date':e.get('published',datetime.now(timezone.utc).isoformat()), 'form':form or 'Unclassified', **issuer}
-        fresh.append(item); seen_set.add(uid)
-    # Persist deduplication state (retain most recent 20,000 IDs).
-    STATE.write_text(json.dumps(list(seen_set)[-20000:], indent=2))
-    existing=[]
-    if OUT.exists():
-        old=feedparser.parse(str(OUT))
-        for e in old.entries:
-            existing.append({'title':e.title,'link':e.link,'date':e.get('published',''),'form':'Previously published','ticker':'','name':'','exchange':''})
-    all_items = (fresh + existing)[:500]
-    now=datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
-    xml=['<?xml version="1.0" encoding="UTF-8"?>','<rss version="2.0"><channel>',
-         '<title>Oracle Finance — US Market Filings</title>',
-         '<link>https://www.sec.gov/</link>',
-         '<description>Filtered SEC filings for NYSE and Nasdaq issuers monitored by Oracle Finance.</description>',
-         f'<lastBuildDate>{now}</lastBuildDate>']
-    for x in all_items:
-        xml += ['<item>',f'<title>{esc(x["ticker"])} | {esc(x["form"])} | {esc(x["title"])}</title>',
-                f'<link>{esc(x["link"])}</link>',f'<description>{esc(x["name"])} ({esc(x["exchange"])})</description>',
-                f'<pubDate>{esc(x["date"])}</pubDate>','</item>']
-    xml += ['</channel></rss>']
-    OUT.write_text('\n'.join(xml), encoding='utf-8')
-    if fresh:
-        send_email(fresh)
-    print(f'Issuer map: {len(issuers)} SEC-mapped NYSE/Nasdaq issuer records; new matched filings: {len(fresh)}')
+
+def fetch_sec_feed():
+    """Fetch the SEC RSS/Atom feed using the declared SEC User-Agent."""
+    response = session.get(RSS_URL, timeout=30)
+    response.raise_for_status()
+
+    parsed = feedparser.parse(response.content)
+
+    if parsed.bozo and not parsed.entries:
+        raise RuntimeError(
+            f"SEC RSS feed could not be parsed: {parsed.bozo_exception}"
+        )
+
+    return parsed.entries
+
+
+def extract_cik(entry):
+    """Extract the issuer CIK from the filing link or feed text."""
+    candidates = [
+        entry.get("link", ""),
+        entry.get("id", ""),
+        entry.get("summary", ""),
+        entry.get("title", ""),
+    ]
+
+    patterns = [
+        r"/data/0*(\d{1,10})/",
+        r"\bCIK\s*=?\s*0*(\d{1,10})\b",
+    ]
+
+    for candidate in candidates:
+        for pattern in patterns:
+            match = re.search(pattern, str(candidate), re.IGNORECASE)
+            if match:
+                return normalize_cik(match.group(1))
+
+    return ""
+
+
+def extract_form(entry):
+    """Identify a watched filing form from feed metadata or title."""
+    text = " ".join([
+        str(entry.get("form") or ""),
+        str(entry.get("title") or ""),
+        str(entry.get("summary") or ""),
+    ])
+
+    # Match longer form names first, avoiding partial matches.
+    forms = sorted(WATCH_FORMS, key=len, reverse=True)
+
+    for form in forms:
+        pattern = (
+            r"(?<![A-Z0-9])"
+            + re.escape(form)
+            + r"(?:/[A-Z])?"
+            + r"(?![A-Z0-9])"
+        )
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(0).upper()
+
+    return ""
+
+
+def get_entry_date(entry):
+    """Return a valid RFC 2822 date for the RSS item."""
+    published = entry.get("published") or entry.get("updated")
+
+    if published:
+        try:
+            dt = parsedate_to_datetime(published)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return format_datetime(dt.astimezone(timezone.utc))
+        except (TypeError, ValueError, OverflowError):
+            pass
+
+    parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+    if parsed:
+        try:
+            dt = datetime(*parsed[:6], tzinfo=timezone.utc)
+            return format_datetime(dt)
+        except (TypeError, ValueError, OverflowError):
+            pass
+
+    return format_datetime(datetime.now(timezone.utc))
+
+
+def load_seen_state():
+    """Read prior filing IDs; tolerate a missing or older state file."""
+    if not STATE_FILE.exists():
+        return []
+
+    try:
+        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        print("WARNING: Could not read previous seen.json; starting a new state.")
+        return []
+
+    if isinstance(data, list):
+        return [str(item) for item in data]
+
+    if isinstance(data, dict):
+        values = data.get("seen", [])
+        if isinstance(values, list):
+            return [str(item) for item in values]
+
+    return []
+
+
+def entry_identifier(entry):
+    """Create a stable identifier to prevent repeat notifications."""
+    value = entry.get("id") or entry.get("link")
+
+    if not value:
+        value = (
+            str(entry.get("title", ""))
+            + "|"
+            + str(entry.get("published", ""))
+        )
+
+    return hashlib.sha256(str(value).encode("utf-8")).hexdigest()
+
+
+def escape_xml(value):
+    return html.escape(str(value or ""), quote=True)
+
+
+def load_existing_rss_items():
+    """Preserve previously published feed entries."""
+    if not OUTPUT_FILE.exists():
+        return []
+
+    try:
+        parsed = feedparser.parse(OUTPUT_FILE.read_bytes())
+    except OSError:
+        return []
+
+    items = []
+
+    for entry in parsed.entries:
+        items.append({
+            "title": entry.get("title", "SEC filing"),
+            "link": entry.get("link", ""),
+            "date": entry.get("published", ""),
+            "form": "Previously published",
+            "ticker": "",
+            "name": "",
+            "exchange": "",
+        })
+
+    return items
+
+
+def write_rss_feed(new_items):
+    """Write a valid RSS 2.0 feed, keeping recent items first."""
+    old_items = load_existing_rss_items()
+
+    combined = []
+    seen_links = set()
+
+    for item in new_items + old_items:
+        link = item.get("link", "").strip()
+
+        if link and link in seen_links:
+            continue
+
+        if link:
+            seen_links.add(link)
+
+        combined.append(item)
+
+    combined = combined[:500]
+
+    now = format_datetime(datetime.now(timezone.utc))
+
+    xml = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<rss version="2.0">',
+        "<channel>",
+        "<title>Oracle Finance — US Market Filings</title>",
+        "<link>https://www.sec.gov/</link>",
+        (
+            "<description>SEC filing alerts for SEC-mapped "
+            "NYSE and Nasdaq issuers monitored by Oracle Finance.</description>"
+        ),
+        f"<lastBuildDate>{escape_xml(now)}</lastBuildDate>",
+    ]
+
+    for item in combined:
+        title = (
+            f"{item.get('ticker', '')} | "
+            f"{item.get('form', '')} | "
+            f"{item.get('title', 'SEC filing')}"
+        ).strip(" |")
+
+        description = (
+            f"{item.get('name', '')} "
+            f"({item.get('exchange', '')})"
+        ).strip()
+
+        xml.extend([
+            "<item>",
+            f"<title>{escape_xml(title)}</title>",
+            f"<link>{escape_xml(item.get('link', ''))}</link>",
+            f"<description>{escape_xml(description)}</description>",
+            f"<pubDate>{escape_xml(item.get('date', now))}</pubDate>",
+            "</item>",
+        ])
+
+    xml.extend(["</channel>", "</rss>"])
+
+    OUTPUT_FILE.write_text("\n".join(xml), encoding="utf-8")
+
 
 def send_email(items):
-    host=os.environ.get('SMTP_HOST','smtp.gmail.com'); port=int(os.environ.get('SMTP_PORT','465'))
-    user=os.environ['SMTP_USER']; password=os.environ['SMTP_APP_PASSWORD']; recipient=os.environ['ALERT_TO']
-    msg=EmailMessage(); msg['Subject']=f'[ORACLE US FILINGS] {len(items)} new filing(s)'
-    msg['From']=user; msg['To']=recipient
-    lines=['Oracle Finance — new SEC filing alerts','']
-    for x in items:
-        lines += [f"{x['ticker']} ({x['exchange']}) — {x['form']}", x['name'], x['title'], x['date'], x['link'], '']
-    msg.set_content('\n'.join(lines))
-    with smtplib.SMTP_SSL(host,port,timeout=30) as s:
-        s.login(user,password); s.send_message(msg)
+    """Send one email containing all new matched filings."""
+    user = os.environ.get("SMTP_USER", "").strip()
+    password = os.environ.get("SMTP_APP_PASSWORD", "").strip()
+    recipient = os.environ.get("ALERT_TO", "").strip()
 
-if __name__ == '__main__': main()
+    if not user or not password or not recipient:
+        print(
+            "WARNING: New filings were found, but email was not sent. "
+            "Check SMTP_USER, SMTP_APP_PASSWORD and ALERT_TO secrets."
+        )
+        return
+
+    host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+    port = int(os.environ.get("SMTP_PORT", "465"))
+
+    message = EmailMessage()
+    message["Subject"] = (
+        f"[ORACLE FINANCE US FILINGS] {len(items)} new filing(s)"
+    )
+    message["From"] = user
+    message["To"] = recipient
+
+    lines = [
+        "ORACLE FINANCE — NEW SEC FILING ALERTS",
+        "",
+        f"New matched filings: {len(items)}",
+        "",
+    ]
+
+    for item in items:
+        lines.extend([
+            f"{item['ticker']} ({item['exchange']}) — {item['form']}",
+            item["name"],
+            item["title"],
+            item["date"],
+            item["link"],
+            "",
+        ])
+
+    message.set_content("\n".join(lines))
+
+    with smtplib.SMTP_SSL(host, port, timeout=30) as server:
+        server.login(user, password)
+        server.send_message(message)
+
+    print(f"Email alert sent to {recipient}.")
+
+
+def main():
+    print("Starting Oracle Finance US filing monitor...")
+
+    issuers = load_issuer_map()
+    print(f"Loaded {len(issuers)} SEC-mapped NYSE/Nasdaq issuer records.")
+
+    entries = fetch_sec_feed()
+    print(f"SEC feed entries received: {len(entries)}")
+
+    seen_ids = load_seen_state()
+    seen_set = set(seen_ids)
+
+    new_ids = []
+    fresh_items = []
+
+    for entry in entries:
+        cik = extract_cik(entry)
+        if not cik:
+            continue
+
+        issuer = issuers.get(cik)
+        if not issuer:
+            continue
+
+        form = extract_form(entry)
+        if not form:
+            continue
+
+        link = str(entry.get("link") or "").strip()
+        title = str(entry.get("title") or "SEC filing").strip()
+
+        identifier = entry_identifier(entry)
+        if identifier in seen_set:
+            continue
+
+        item = {
+            "title": title,
+            "link": link,
+            "date": get_entry_date(entry),
+            "form": form,
+            **issuer,
+        }
+
+        fresh_items.append(item)
+        new_ids.append(identifier)
+        seen_set.add(identifier)
+
+    # Keep a bounded, deterministic duplicate-protection history.
+    updated_ids = (seen_ids + new_ids)[-20000:]
+    STATE_FILE.write_text(
+        json.dumps(updated_ids, indent=2),
+        encoding="utf-8",
+    )
+
+    write_rss_feed(fresh_items)
+
+    if fresh_items:
+        send_email(fresh_items)
+    else:
+        print("No new matched filings found in this feed check.")
+
+    print(
+        "Completed. "
+        f"New matched filings: {len(fresh_items)}. "
+        f"RSS output: {OUTPUT_FILE}"
+    )
+
+
+if __name__ == "__main__":
+    main()
+    
