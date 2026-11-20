@@ -19,7 +19,49 @@ FORMS = set(os.getenv('WATCH_FORMS', '8-K,10-Q,10-K,4,3,5,SC 13D,SC 13G,13D,13G,
 session = requests.Session()
 session.headers.update({'User-Agent': USER_AGENT, 'Accept-Encoding': 'gzip, deflate', 'Host': 'www.sec.gov'})
 
+
 def load_issuer_map():
+    r = session.get(SEC_TICKERS, timeout=30)
+    r.raise_for_status()
+    raw = r.json()
+
+    # SEC directory uses fields + data arrays.
+    if isinstance(raw, dict) and isinstance(raw.get('fields'), list) and isinstance(raw.get('data'), list):
+        fields = raw['fields']
+        rows = [
+            dict(zip(fields, row))
+            for row in raw['data']
+            if isinstance(row, list)
+        ]
+    elif isinstance(raw, dict) and isinstance(raw.get('data'), list):
+        rows = raw['data']
+    elif isinstance(raw, dict):
+        rows = list(raw.values())
+    else:
+        rows = raw
+
+    out = {}
+
+    for x in rows:
+        if not isinstance(x, dict):
+            continue
+
+        exchange = str(x.get('exchange', '')).strip().upper()
+        if exchange not in {'NYSE', 'NASDAQ'}:
+            continue
+
+        cik = str(x.get('cik_str') or x.get('cik') or '').zfill(10)
+        ticker = str(x.get('ticker', '')).strip().upper()
+
+        if cik and ticker:
+            out[cik] = {
+                'ticker': ticker,
+                'name': x.get('name') or x.get('title', ''),
+                'exchange': exchange
+            }
+
+    return out
+    
     r = session.get(SEC_TICKERS, timeout=30); r.raise_for_status()
     raw = r.json()
     rows = raw.values() if isinstance(raw, dict) else raw
