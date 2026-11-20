@@ -21,7 +21,10 @@ session.headers.update({'User-Agent': USER_AGENT, 'Accept-Encoding': 'gzip, defl
 
 
 def load_issuer_map():
-    r = session.get(SEC_TICKERS, timeout=30)
+        return out
+
+
+def esc(s):
     r.raise_for_status()
     raw = r.json()
 
