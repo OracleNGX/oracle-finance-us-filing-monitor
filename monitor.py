@@ -66,6 +66,51 @@ def esc(s):
         .replace('"', '&quot;')
         .replace("'", '&apos;')
     )
+    r = session.get(SEC_TICKERS, timeout=30)
+    r.raise_for_status()
+    raw = r.json()
+
+    if isinstance(raw, dict) and isinstance(raw.get('fields'), list):
+        fields = raw['fields']
+        rows = [dict(zip(fields, row)) for row in raw['data']]
+    else:
+        rows = raw.values() if isinstance(raw, dict) else raw
+
+    out = {}
+
+    for x in rows:
+        if not isinstance(x, dict):
+            continue
+
+        exchange = str(x.get('exchange', '')).strip().upper()
+        if exchange not in {'NYSE', 'NASDAQ'}:
+            continue
+
+        cik = str(x.get('cik_str') or x.get('cik') or '').zfill(10)
+        ticker = str(x.get('ticker', '')).strip().upper()
+
+        if cik and ticker:
+            out[cik] = {
+                'ticker': ticker,
+                'name': x.get('name') or x.get('title', ''),
+                'exchange': exchange
+            }
+
+    if not out:
+        raise RuntimeError("No NYSE/Nasdaq issuers returned by SEC")
+
+    return out
+
+
+def esc(s):
+    return (
+        str(s)
+        .replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+        .replace('"', '&quot;')
+        .replace("'", '&apos;')
+    )
         return out
 
 
