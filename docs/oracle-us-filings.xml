@@ -4,23 +4,29 @@
 <title>Oracle Finance — US Market Filings</title>
 <link>https://www.sec.gov/</link>
 <description>SEC filing alerts for SEC-mapped NYSE and Nasdaq issuers monitored by Oracle Finance.</description>
-<lastBuildDate>Fri, 20 Nov 2026 16:20:58 +0000</lastBuildDate>
+<lastBuildDate>Fri, 20 Nov 2026 17:22:16 +0000</lastBuildDate>
 <item>
-<title>ADP | 4 | 144 - AUTOMATIC DATA PROCESSING INC (0000008670) (Subject)</title>
+<title>ASH | 10-K | 10-K - ASHLAND INC. (0001674862) (Filer)</title>
+<link>https://www.sec.gov/Archives/edgar/data/1674862/000119312526469716/0001193125-26-469716-index.htm</link>
+<description>ASHLAND INC. (NYSE)</description>
+<pubDate>Fri, 20 Nov 2026 17:17:38 +0000</pubDate>
+</item>
+<item>
+<title>Previously published | ADP | 4 | 144 - AUTOMATIC DATA PROCESSING INC (0000008670) (Subject)</title>
 <link>https://www.sec.gov/Archives/edgar/data/8670/000195917326008183/0001959173-26-008183-index.htm</link>
-<description>AUTOMATIC DATA PROCESSING INC (NASDAQ)</description>
+<description>()</description>
 <pubDate>Fri, 20 Nov 2026 16:11:45 +0000</pubDate>
 </item>
 <item>
-<title>ORLY | 4 | 144 - O REILLY AUTOMOTIVE INC (0000898173) (Subject)</title>
+<title>Previously published | ORLY | 4 | 144 - O REILLY AUTOMOTIVE INC (0000898173) (Subject)</title>
 <link>https://www.sec.gov/Archives/edgar/data/898173/000195917326008181/0001959173-26-008181-index.htm</link>
-<description>O REILLY AUTOMOTIVE INC (NASDAQ)</description>
+<description>()</description>
 <pubDate>Fri, 20 Nov 2026 16:09:06 +0000</pubDate>
 </item>
 <item>
-<title>JAGX | 8-K | 8-K - Jaguar Health, Inc. (0001585608) (Filer)</title>
+<title>Previously published | JAGX | 8-K | 8-K - Jaguar Health, Inc. (0001585608) (Filer)</title>
 <link>https://www.sec.gov/Archives/edgar/data/1585608/000119312526469575/0001193125-26-469575-index.htm</link>
-<description>Jaguar Health, Inc. (NASDAQ)</description>
+<description>()</description>
 <pubDate>Fri, 20 Nov 2026 16:08:51 +0000</pubDate>
 </item>
 </channel>
