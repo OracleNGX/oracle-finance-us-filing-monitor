@@ -1,0 +1,36 @@
+name: Oracle Finance Global filings aggregator
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * 1-5"
+permissions:
+  contents: write
+concurrency:
+  group: oracle-finance-global-filings-aggregator
+  cancel-in-progress: false
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build unified global feed
+        run: python global_feed_aggregator.py
+      - name: Publish unified feed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/oracle-global-filings.xml
+          if ! git diff --cached --quiet; then
+            git commit -m "Update Oracle Finance global filings feed"
+            git push origin HEAD:main
+          else
+            echo "No changes to publish."
+          fi
