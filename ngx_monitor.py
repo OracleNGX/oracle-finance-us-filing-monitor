@@ -17,7 +17,7 @@ DATA = BASE / "data"
 DOCS = BASE / "docs"
 STATE = DATA / "ngx_seen.json"
 FEED = DOCS / "oracle-ngx-filings.xml"
-SOURCE = "https://www.ngxgroup.com/exchange/data/corporate-disclosures/"
+SOURCE = "https://ngxgroup.com/exchange/data/corporate-disclosures/"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; OracleFinanceNGXMonitor/1.0; +mailto:officialoraclefinance@gmail.com)",
