@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import format_datetime
-from html.parser import HTMLParser
+from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
 import requests
@@ -17,7 +17,7 @@ DATA = BASE / "data"
 DOCS = BASE / "docs"
 STATE = DATA / "ngx_seen.json"
 FEED = DOCS / "oracle-ngx-filings.xml"
-SOURCE = "https://ngxgroup.com/exchange/data/corporate-disclosures/"
+SOURCE = "https://ngxwebsite-dc69c46e9b-hxcxhmabe6aubmg9.a03.azurefd.net/exchange/data/corporate-disclosures/"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; OracleFinanceNGXMonitor/1.0; +mailto:officialoraclefinance@gmail.com)",
@@ -28,96 +28,69 @@ DATA.mkdir(exist_ok=True)
 DOCS.mkdir(exist_ok=True)
 
 
-class DisclosureTableParser(HTMLParser):
-    """Extract rows from the NGX public Corporate Disclosures table."""
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.in_table = False
-        self.in_row = False
-        self.in_cell = False
-        self.cell_text = []
-        self.row = []
-        self.rows = []
-        self.current_link = None
-        self.cell_link = None
-
-    def handle_starttag(self, tag, attrs):
-        attrs = dict(attrs)
-        if tag == "table":
-            self.in_table = True
-        elif self.in_table and tag == "tr":
-            self.in_row = True
-            self.row = []
-        elif self.in_row and tag in ("td", "th"):
-            self.in_cell = True
-            self.cell_text = []
-            self.cell_link = None
-        elif self.in_cell and tag == "a":
-            href = attrs.get("href")
-            if href:
-                self.cell_link = href
-
-    def handle_data(self, data):
-        if self.in_cell:
-            self.cell_text.append(data)
-
-    def handle_endtag(self, tag):
-        if self.in_cell and tag in ("td", "th"):
-            self.row.append({
-                "text": " ".join(" ".join(self.cell_text).split()),
-                "link": self.cell_link,
-            })
-            self.in_cell = False
-        elif self.in_row and tag == "tr":
-            if self.row:
-                self.rows.append(self.row)
-            self.in_row = False
-        elif tag == "table" and self.in_table:
-            self.in_table = False
-
-
 def fetch_disclosures():
     response = requests.get(SOURCE, headers=HEADERS, timeout=45)
     response.raise_for_status()
-    if "text/html" not in response.headers.get("Content-Type", "").lower():
-        raise RuntimeError("NGX disclosures page did not return HTML.")
-
-    parser = DisclosureTableParser()
-    parser.feed(response.text)
+    soup = BeautifulSoup(response.text, "html.parser")
 
     records = []
-    for row in parser.rows:
-        cells = [cell.get("text", "").strip() for cell in row]
-        if len(cells) < 3:
+    # Find tables using their header labels instead of brittle table state parsing.
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        if not rows:
             continue
-        normalized = " ".join(cells).lower()
-        if "company" in normalized and "disclosure" in normalized and "date submitted" in normalized:
+        headers = [cell.get_text(" ", strip=True).lower() for cell in rows[0].find_all(["th", "td"])]
+        if not headers:
             continue
-
-        company = cells[0]
-        disclosure = cells[1]
-        submitted = cells[2]
-        link = row[1].get("link") or row[0].get("link")
-
-        if not company or not disclosure or not submitted:
-            continue
-        if len(company) > 180 or len(disclosure) > 500:
-            continue
-        if not link:
+        company_idx = next((i for i, h in enumerate(headers) if "company" in h), None)
+        disclosure_idx = next((i for i, h in enumerate(headers) if "disclosure" in h), None)
+        date_idx = next((i for i, h in enumerate(headers) if "date" in h and ("submitted" in h or "date" in h)), None)
+        if company_idx is None or disclosure_idx is None or date_idx is None:
             continue
 
-        records.append({
-            "company": company,
-            "title": disclosure,
-            "submitted": submitted,
-            "link": urljoin(SOURCE, link),
-        })
+        for row in rows[1:]:
+            cells = row.find_all(["td", "th"])
+            if max(company_idx, disclosure_idx, date_idx) >= len(cells):
+                continue
+            company_cell = cells[company_idx]
+            disclosure_cell = cells[disclosure_idx]
+            date_cell = cells[date_idx]
+            company = company_cell.get_text(" ", strip=True)
+            title = disclosure_cell.get_text(" ", strip=True)
+            submitted = date_cell.get_text(" ", strip=True)
+            anchor = disclosure_cell.find("a", href=True) or company_cell.find("a", href=True)
+            if not anchor:
+                anchor = row.find("a", href=True)
+            link = anchor["href"] if anchor else ""
+            if not company or not title or not submitted or not link:
+                continue
+            records.append({
+                "company": company,
+                "title": title,
+                "submitted": submitted,
+                "link": urljoin(SOURCE, link),
+            })
 
     if not records:
-        raise RuntimeError(
-            "No disclosure rows could be parsed from the NGX page. "
-            "The page may have changed or may require JavaScript; no empty feed was published."
-        )
+        # Fallback: try common NGX disclosure cards/links with row text and document links.
+        for anchor in soup.find_all("a", href=True):
+            text = anchor.get_text(" ", strip=True)
+            href = anchor["href"]
+            if not text or not (".pdf" in href.lower() or "document" in href.lower()):
+                continue
+            parent = anchor.parent
+            block = parent.get_text(" ", strip=True) if parent else text
+            if len(block) < 15:
+                continue
+            records.append({
+                "company": "NGX disclosure",
+                "title": block[:500],
+                "submitted": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                "link": urljoin(SOURCE, href),
+            })
+
+    if not records:
+        raise RuntimeError("No disclosure records found in NGX page HTML. Page structure may be JavaScript-driven.")
     return records
 
 
