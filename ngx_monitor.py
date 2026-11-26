@@ -10,8 +10,8 @@ import requests
 BASE=Path(__file__).resolve().parent
 DATA,DOCS=BASE/"data",BASE/"docs"
 STATE,FEED=DATA/"ngx_seen.json",DOCS/"oracle-ngx-filings.xml"
-SOURCE="https://www.ngxgroup.com/exchange/data/corporate-disclosures/"
-ALT="https://ngxwebsite-dc69c46e9b-hxcxhmabe6aubmg9.a03.azurefd.net/exchange/data/corporate-disclosures/"
+SOURCE="https://ngxwebsite-dc69c46e9b-hxcxhmabe6aubmg9.a03.azurefd.net/exchange/data/corporate-disclosures/"
+ALT="https://www.ngxgroup.com/exchange/data/corporate-disclosures/"
 HEADERS={"User-Agent":"Mozilla/5.0 (compatible; OracleFinanceNGXMonitor/2.0; +mailto:officialoraclefinance@gmail.com)","Accept":"text/html,application/xhtml+xml"}
 DATA.mkdir(exist_ok=True); DOCS.mkdir(exist_ok=True)
 S=requests.Session(); S.headers.update(HEADERS)
