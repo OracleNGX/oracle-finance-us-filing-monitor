@@ -14,7 +14,7 @@ jobs:
         run: |
           python - <<'PY'
           import os, json, urllib.request, urllib.parse
-          token=os.environ.get("TELEGRAM_BOT_TOKEN","")
+          token="".join(os.environ.get("TELEGRAM_BOT_TOKEN","").split())
           chat=os.environ.get("TELEGRAM_CHAT_ID","")
           if not token or not chat:
               raise SystemExit("Telegram secrets are missing.")
