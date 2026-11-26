@@ -13,17 +13,23 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python - <<'PY'
-          import os, json, urllib.request, urllib.parse
-          token="".join(os.environ.get("TELEGRAM_BOT_TOKEN","").split())
-          chat=os.environ.get("TELEGRAM_CHAT_ID","")
+          import os, json, re, urllib.request, urllib.parse
+          raw=os.environ.get("TELEGRAM_BOT_TOKEN","").strip().strip('"').strip("'")
+          token="".join(raw.split())
+          chat=os.environ.get("TELEGRAM_CHAT_ID","").strip()
           if not token or not chat:
-              raise SystemExit("Telegram secrets are missing.")
+              raise SystemExit("Telegram secrets are missing or blank.")
+          if not re.fullmatch(r"[0-9]+:[A-Za-z0-9_-]+", token):
+              raise SystemExit("Bot token format is invalid. Replace TELEGRAM_BOT_TOKEN with the exact token from BotFather; do not include quotes, spaces, or a URL.")
           msg="✅ Oracle Finance Telegram delivery test\n\nYour automated filings alert channel is connected. This is a test message, not a filing alert."
           data=urllib.parse.urlencode({"chat_id":chat,"text":msg}).encode()
           req=urllib.request.Request("https://api.telegram.org/bot"+token+"/sendMessage",data=data)
-          with urllib.request.urlopen(req,timeout=20) as response:
-              result=json.loads(response.read().decode())
+          try:
+              with urllib.request.urlopen(req,timeout=20) as response:
+                  result=json.loads(response.read().decode())
+          except Exception as e:
+              raise SystemExit("Telegram API request failed: "+str(e))
           if not result.get("ok"):
-              raise SystemExit("Telegram API rejected the test message.")
+              raise SystemExit("Telegram API rejected the test message: "+str(result))
           print("Test message sent successfully.")
           PY
