@@ -1,0 +1,29 @@
+name: Oracle Finance Telegram delivery test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Telegram test message
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import os, json, urllib.request, urllib.parse
+          token=os.environ.get("TELEGRAM_BOT_TOKEN","")
+          chat=os.environ.get("TELEGRAM_CHAT_ID","")
+          if not token or not chat:
+              raise SystemExit("Telegram secrets are missing.")
+          msg="✅ Oracle Finance Telegram delivery test\n\nYour automated filings alert channel is connected. This is a test message, not a filing alert."
+          data=urllib.parse.urlencode({"chat_id":chat,"text":msg}).encode()
+          req=urllib.request.Request("https://api.telegram.org/bot"+token+"/sendMessage",data=data)
+          with urllib.request.urlopen(req,timeout=20) as response:
+              result=json.loads(response.read().decode())
+          if not result.get("ok"):
+              raise SystemExit("Telegram API rejected the test message.")
+          print("Test message sent successfully.")
+          PY
