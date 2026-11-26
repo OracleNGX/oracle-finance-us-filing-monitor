@@ -23,13 +23,21 @@ jobs:
           python-version: "3.12"
       - name: Build unified global feed
         run: python global_feed_aggregator.py
-      - name: Publish unified feed
+      - name: Send Telegram alerts for new filings
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python telegram_alerts.py
+      - name: Publish unified feed and alert state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/oracle-global-filings.xml docs/telegram-alert-state.json
+          git add docs/oracle-global-filings.xml
+          if [ -f docs/telegram-alert-state.json ]; then
+            git add docs/telegram-alert-state.json
+          fi
           if ! git diff --cached --quiet; then
-            git commit -m "Update Oracle Finance global filings feed"
+            git commit -m "Update Oracle Finance global filings feed and alert state"
             git push origin HEAD:main
           else
             echo "No changes to publish."
