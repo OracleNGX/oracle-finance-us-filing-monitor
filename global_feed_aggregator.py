@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Merge Oracle Finance US, China and NGX RSS feeds into one global feed."""
+"""Merge Oracle Finance US, China and NGX RSS feeds into one sorted global feed."""
 from pathlib import Path
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import xml.etree.ElementTree as ET
 import html
 
@@ -33,13 +34,21 @@ def read_items(market, filename):
   out.append({"market":market,"title":title,"link":link,"date":date,"desc":desc})
  return out
 
+def date_key(item):
+ try:
+  dt=parsedate_to_datetime(item.get("date",""))
+  if dt.tzinfo is None: dt=dt.replace(tzinfo=timezone.utc)
+  return dt.timestamp()
+ except (TypeError,ValueError,OverflowError):
+  return 0
+
 items=[]
 for market,filename in SOURCES: items.extend(read_items(market,filename))
-# Deduplicate by link and retain newest feed item order; then sort date strings where parseable.
 unique=[]; links=set()
 for item in items:
  if item["link"] in links: continue
  links.add(item["link"]); unique.append(item)
+unique.sort(key=date_key, reverse=True)
 unique=unique[:1000]
 
 def escape(v): return html.escape(str(v or ""), quote=True)
@@ -58,5 +67,5 @@ for item in unique:
  lines.append('</item>')
 lines.extend(['</channel></rss>'])
 OUT.write_text("\n".join(lines)+"\n",encoding="utf-8")
-print(f"Global feed built: {len(unique)} unique items from {len(items)} source items.")
+print(f"Global feed built: {len(unique)} unique items from {len(items)} source items, sorted newest first.")
 print(f"Output: {OUT}")
