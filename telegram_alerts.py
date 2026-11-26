@@ -6,7 +6,7 @@ from pathlib import Path
 BASE=Path(__file__).resolve().parent
 FEED=BASE/"docs/oracle-global-filings.xml"
 STATE=BASE/"docs/telegram-alert-state.json"
-token=os.environ.get("TELEGRAM_BOT_TOKEN","")
+token="".join(os.environ.get("TELEGRAM_BOT_TOKEN","").split())
 chat=os.environ.get("TELEGRAM_CHAT_ID","")
 if not token or not chat:
     raise SystemExit("Telegram secrets are missing.")
